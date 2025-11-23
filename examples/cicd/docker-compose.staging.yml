@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  web:
+    image: ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHA}
+    container_name: ${APP_NAME}-staging
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=staging
+      - DATABASE_URL=postgres://user:pass@db:5432/${APP_NAME}_staging
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    networks:
+      - app-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.${APP_NAME}-staging.rule=Host(`staging.${DOMAIN}`)"
+      - "traefik.http.routers.${APP_NAME}-staging.entrypoints=web"
+
+  db:
+    image: postgres:15-alpine
+    container_name: ${APP_NAME}-db-staging
+    environment:
+      - POSTGRES_DB=${APP_NAME}_staging
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=pass
+    volumes:
+      - ${APP_NAME}_db_data_staging:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  redis:
+    image: redis:alpine
+    container_name: ${APP_NAME}-redis-staging
+    command: redis-server --requirepass your_redis_password
+    volumes:
+      - ${APP_NAME}_redis_data_staging:/data
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  ${APP_NAME}_db_data_staging:
+  ${APP_NAME}_redis_data_staging:

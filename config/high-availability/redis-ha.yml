@@ -1,0 +1,65 @@
+# Redis HA with Sentinel
+version: '3.8'
+
+services:
+  # Redis Master
+  redis-master:
+    image: redis:7.0.5
+    command: redis-server --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD}
+    networks:
+      - redis-network
+    deploy:
+      placement:
+        constraints: [node.labels.redis == master]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Redis Replicas
+  redis-replica1:
+    image: redis:7.0.5
+    command: redis-server --replicaof redis-master 6379 --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD}
+    networks:
+      - redis-network
+    deploy:
+      replicas: 2
+      placement:
+        constraints: [node.labels.redis == replica]
+    depends_on:
+      - redis-master
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Redis Sentinel
+  redis-sentinel1:
+    image: redis:7.0.5
+    command: >
+      /bin/sh -c "
+      echo 'port 26379
+      dir /tmp
+      sentinel monitor mymaster redis-master 6379 2
+      sentinel down-after-milliseconds mymaster 5000
+      sentinel failover-timeout mymaster 60000
+      sentinel parallel-syncs mymaster 1
+      sentinel auth-pass mymaster ${REDIS_PASSWORD}' > /sentinel.conf &&
+      redis-sentinel /sentinel.conf
+      "
+    networks:
+      - redis-network
+    deploy:
+      replicas: 3
+      placement:
+        spread: node.labels.redis
+    depends_on:
+      - redis-master
+      - redis-replica1
+
+networks:
+  redis-network:
+    driver: overlay
+    attachable: true

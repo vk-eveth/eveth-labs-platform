@@ -1,0 +1,107 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - '/etc/prometheus/alert.rules'
+  - '/etc/prometheus/recording.rules'
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Node Exporter
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: ([^:]+)(?::\d+)?
+        target_label: instance
+        replacement: $1
+
+  # Docker Daemon
+  - job_name: 'docker'
+    static_configs:
+      - targets: ['docker-exporter:9323']
+
+  # cAdvisor
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  # Traefik
+  - job_name: 'traefik'
+    static_configs:
+      - targets: ['traefik:8082']
+
+  # PostgreSQL
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    metrics_path: /metrics
+
+  # Redis
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    metrics_path: /scrape
+    params:
+      target: [redis://redis:6379]
+
+  # GitLab
+  - job_name: 'gitlab'
+    metrics_path: '/-/metrics'
+    scheme: https
+    basic_auth:
+      username: '${GITLAB_MONITORING_USER}'
+      password: '${GITLAB_MONITORING_TOKEN}'
+    static_configs:
+      - targets: ['gitlab.example.com']
+
+  # Blackbox Exporter
+  - job_name: 'blackbox-http'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+        - https://gitlab.example.com
+        - https://harbor.example.com
+        - https://sonarqube.example.com
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # Service Discovery
+  - job_name: 'docker-service-discovery'
+    dockersd:
+      host: unix:///var/run/docker.sock
+      refresh_interval: 30s
+      filters:
+        - name: label
+          values: ['prometheus.enable=true']
+    relabel_configs:
+      - source_labels: [__meta_dockerswarm_service_name]
+        target_label: service
+      - source_labels: [__meta_dockerswarm_task_slot]
+        target_label: task_slot
+      - source_labels: [__meta_dockerswarm_node_id]
+        target_label: node_id
+      - source_labels: [__meta_dockerswarm_service_label_prometheus_port]
+        regex: (.+)
+        target_label: __address__
+        replacement: $1
+        action: replace

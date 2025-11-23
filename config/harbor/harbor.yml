@@ -1,0 +1,260 @@
+# Harbor Configuration
+# This file is managed by Eveth Labs Platform
+
+# Hostname configuration
+# DO NOT use localhost or 127.0.0.1
+hostname: ${HARBOR_DOMAIN:-harbor.evethlabstech}
+
+# HTTP configuration (localhost dev: serve HTTP only on a non-80 port)
+http:
+  port: 8080
+
+# HTTPS disabled for localhost development
+# https:
+#   port: 8444
+#   certificate: /etc/harbor/ssl/tls.crt
+#   private_key: /etc/harbor/ssl/tls.key
+#   relativeurls: false
+#   http2: false
+
+# Uncomment following will enable tls communication between all harbor components
+internal_tls:
+  enabled: false
+  dir: /etc/harbor/tls/internal
+
+# Uncomment external_url if you want to enable external proxy
+# And when it enabled the hostname will no longer used
+# external_url: https://${HARBOR_DOMAIN}
+
+# The initial password of Harbor admin
+# It only works in first time to install harbor
+# Remember Change the admin password from UI after launching Harbor.
+harbor_admin_password: ${HARBOR_ADMIN_PASSWORD}
+
+# Harbor DB configuration
+database:
+  # The password for the root user of Harbor DB. Change this before any production use.
+  password: ${HARBOR_DB_PASSWORD}
+  # The maximum number of connections in the idle connection pool. If it <=0, no idle connections are retained.
+  max_idle_conns: 50
+  # The maximum number of open connections to the database. If <= 0, then there is no limit on the number of open connections.
+  max_open_conns: 100
+
+# The default data volume (absolute path on host is injected by prepare script)
+data_volume: ${HARBOR_DATA_VOLUME}
+
+# Harbor Storage settings by default is using /data dir on local filesystem
+# Uncomment storage_service setting If you want to using external storage
+# storage_service:
+#   # ca_bundle is the path to the custom root ca certificate, which will be injected into the truststore
+#   # of registry's and chart repository's containers.  This is usually needed when the user hosts a internal storage with self signed certificate.
+#   ca_bundle:
+
+# Trivy configuration
+#
+# Trivy DB contains vulnerability information from NVD, Red Hat, and many other upstream vulnerability databases.
+# It is downloaded by Trivy from the GitHub release page https://github.com/aquasecurity/trivy-db/releases and then
+# stored in the Trivy backend storage. By default, it is the Trivy local file system. In other words, the default behavior
+# of downloading the Trivy DB is not suitable in a production environment which has no Internet access.
+# So you need to configure the Trivy client settings to set the available Trivy DB in the offline environment.
+# If the for offline environment, you need to download the `trivy-offline.tar.gz` archive manually, and `docker load` it
+# to the local Docker host. Note that the tag should be kept in your downloaded archive.
+#
+trivy:
+  # ignoreUnfixed The flag to display only fixed vulnerabilities
+  ignore_unfixed: false
+  # skipUpdate The flag to enable or disable Trivy DB downloads from GitHub
+  #
+  # This is a must if you don't have Internet access. If it's set to true, you must
+  # download the `trivy-offline.tar.gz` archive manually, then extract
+  # `trivy.db` and `metadata.json` and place them in the Trivy DB path.
+  skip_update: false
+  #
+  # insecure The flag to skip verifying registry certificate
+  insecure: false
+  # github_token The GitHub access token to download Trivy DB
+  #
+  # This is a must if you need to download the Trivy DB from GitHub, as the default
+  # GitHub anonymous access is rate limited to 60 requests per hour. For more details,
+  # please see https://docs.github.com/en/rest/overview/resources-in-the-rest-api#rate-limiting
+  #
+  # You can create a GitHub token by following the instructions in
+  # https://help.github.com/en/github/authenticating-to-github/creating-a-personal-access-token-for-the-command-line
+  #
+  # github_token: xxx
+
+jobservice:
+  # Maximum number of job workers in job service
+  max_job_workers: 10
+  # Loggers for jobservice backend
+  job_loggers:
+    - STD_OUTPUT
+    - FILE
+  # Sweep old job logs periodically (days)
+  logger_sweeper_duration: 1
+  logger_sweeper_settings:
+    work_dir: /var/log/jobs
+
+notification:
+  # Maximum retry count for webhook job
+  webhook_job_max_retry: 10
+  # HTTP client timeout for webhook job requests (seconds)
+  webhook_job_http_client_timeout: 30
+
+# Log configurations
+log:
+  # options are debug, info, warning, error, fatal
+  level: info
+  # configs for logs in local storage
+  local:
+    # Log files are rotated log_rotate_count times before being removed. If count is 0, old versions are removed rather than rotated.
+    rotate_count: 50
+    # Log files are rotated only if they grow bigger than log_rotate_size bytes. If size is followed by k, the size is assumed to be in kilobytes.
+    # If the M is used, the size is in megabytes, and if G is used, the size is in gigabytes. So size 100, size 100k, size 100M and size 100G
+    # are all valid.
+    rotate_size: 200M
+    # The directory on your host that store log
+    location: /var/log/harbor
+
+#This attribute is for migrator to detect the version of the .cfg file, DO NOT MODIFY!
+_version: 2.5.0
+
+# Uncomment external_database if using external database.
+# external_database:
+#   harbor:
+#     host: harbor_db_host
+#     port: harbor_db_port
+#     db_name: harbor
+#     username: harbor
+#     password: password
+#     ssl_mode: disable
+#     max_idle_conns: 2
+#     max_open_conns: 0
+#   notary_signer:
+#     host: notary_signer_db_host
+#     port: notary_signer_db_port
+#     db_name: notary_signer
+#     username: notary_signer
+#     password: password
+#     ssl_mode: disable
+#   notary_server:
+#     host: notary_server_db_host
+#     port: notary_server_db_port
+#     db_name: notary_server
+#     username: notary_server
+#     password: password
+#     ssl_mode: disable
+
+external_redis:
+  host: redis:6379
+  password: ${REDIS_PASSWORD}
+  # db_index 0 is for core, it's unchangeable
+  registry_db_index: 1
+  jobservice_db_index: 2
+  chartmuseum_db_index: 3
+  trivy_db_index: 5
+  idle_timeout_seconds: 30
+
+# Uncomment uaa for trusting the certificate of uaa instance that is hosted via self-signed cert.
+# uaa:
+#   ca_file: /path/to/ca
+
+# Global proxy
+# Config http proxy for components, e.g. http://my.proxy.com:3128
+# Components doesn't need to connect to each others via http proxy.
+# Remove component from `components` array if its HTTP proxy is not needed.
+# proxy:
+#   http_proxy: http://my.proxy.com:3128
+#   https_proxy: http://my.proxy.com:3128
+#   no_proxy: 127.0.0.1,localhost,ui,registry,registryctl,log
+#   components:
+#     - core
+#     - jobservice
+#     - trivy
+
+# metric:
+#   enabled: false
+#   port: 9090
+#   path: /metrics
+
+# Trace related config
+# If OTEL_ENABLED is set to true, you need to uncomment the following sections to enable trace collection.
+# trace:
+#   enabled: true
+#   # set sample_rate=1 if you want to sample 100% of trace data; set 0.5, etc. for sampling 50% of trace data
+#   sample_rate: 1
+#   # The name of the tracer. It can be "jaeger" or "otel"
+#   # The "otel" tracer is only supported with harbor API version v2.8 and higher.
+#   # If you want to use "otel", you need to modify the command in docker-compose.yml
+#   # to add environment variable "OTEL_ENABLED=true" for the services: core, jobservice, portal, registry, registryctl, and chartmuseum.
+#   # And you need to run "make install-otel-opentelemetry-collector" to install otel collector.
+#   # After that, you can use the "otel" tracer.
+#   # If you want to use "jaeger", you need to modify the command in docker-compose.yml
+#   # to add environment variable "JAEGER_ENABLED=true" for the services: core, jobservice, portal, registry, registryctl, and chartmuseum.
+#   # And you need to run "make install-jaeger" to install jaeger.
+#   # After that, you can use the "jaeger" tracer.
+#   tracer_name: ""
+#   # If you want to use jaeger, you need to set the following config.
+#   jaeger:
+#     # The address of jaeger endpoint.
+#     endpoint: http://jaeger:14268/api/traces
+#     # The username of jaeger endpoint.
+#     username: ""
+#     # The password of jaeger endpoint.
+#     password: ""
+#     # The agent host of jaeger endpoint.
+#     agent_host: jaeger
+#     # The agent port of jaeger endpoint.
+#     agent_port: 6831
+#   # If you want to use otel, you need to set the following config.
+#   otel:
+#     # The address of otel endpoint.
+#     endpoint: otel-collector:4317
+#     # The protocol of otel endpoint, support grpc and http.
+#     protocol: grpc
+#     # The compression of otel endpoint, support gzip and none.
+#     compression: gzip
+#     # The timeout of otel endpoint, unit is second.
+#     timeout: 10s
+#     # The insecure of otel endpoint.
+#     insecure: true
+#     # The headers of otel endpoint.
+#     # headers:
+#     #   key1: value1
+#     #   key2: value2
+
+# Enable purge _upload directories
+upload_purging:
+  enabled: true
+  # remove files in _upload directories which exist for a period of time, default is one week.
+  age: 168h
+  # the interval of the purge operations
+  interval: 24h
+  dryrun: false
+
+# Cache layer configurations
+# If this feature enabled, you should change the "RELEASE_HTTP_PROXY" and "RELEASE_HTTPS_PROXY" in the docker-compose.yml file
+# to "http://127.0.0.1:3128" and "https://127.0.0.1:3128"
+# http_proxy:
+#   # proxy for http request
+#   proxy_server: http://127.0.0.1:3128
+#   # If the proxy server requires username and password, you can set them here
+#   # username: admin
+#   # password: password
+#   # If the proxy server is a socks5 proxy, you can set the protocol to socks5
+#   # protocol: socks5
+#   # If the proxy server is a http proxy, you can set the protocol to http
+#   protocol: http
+#   # If the proxy server is a https proxy, you can set the protocol to https
+#   # protocol: https
+#   # If the proxy server is a socks4 proxy, you can set the protocol to socks4
+#   # protocol: socks4
+#   # Whether to enable the proxy for https request
+#   https_proxy: true
+#   # The addresses that do not need to use proxy
+#   no_proxy: 127.0.0.1,localhost,ui,registry,registryctl,log
+#   # The components that need to use proxy
+#   components:
+#     - core
+#     - jobservice
+#     - trivy

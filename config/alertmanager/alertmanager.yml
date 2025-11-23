@@ -1,0 +1,44 @@
+global:
+  resolve_timeout: 5m
+  # Disable SMTP for local development
+  smtp_smarthost: 'localhost:25'
+  smtp_from: 'alertmanager@localhost'
+  smtp_require_tls: false
+
+# Templates can be used to customize notifications
+#templates:
+#  - '/etc/alertmanager/template/*.tmpl'
+
+# The root route on which incoming alerts enter
+templates:
+- '/etc/alertmanager/*.tmpl'
+
+route:
+  # Default receiver
+  receiver: 'null'
+  # Group by alertname, cluster, and service
+  group_by: ['alertname', 'cluster', 'service']
+  # Wait this long to group alerts
+  group_wait: 30s
+  # Send alerts this often if they continue to fire
+  group_interval: 5m
+  # Wait this long before sending a notification about new alerts
+  repeat_interval: 3h
+  # Routes can be nested to create more complex routing trees
+  routes:
+  - match:
+      alertname: Watchdog
+    receiver: 'null'
+
+# Receivers
+receivers:
+- name: 'null'
+
+# Inhibit rules can be used to mute/ignore alerts that match certain criteria
+inhibit_rules:
+- source_match:
+    severity: 'critical'
+  target_match:
+    severity: 'warning'
+  # Apply inhibition if the alertname is the same
+  equal: ['alertname', 'cluster', 'service']

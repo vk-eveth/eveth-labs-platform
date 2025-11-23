@@ -1,0 +1,165 @@
+# PostgreSQL HA with Patroni and etcd
+version: '3.8'
+
+services:
+  # etcd cluster for distributed configuration store
+  etcd0:
+    image: quay.io/coreos/etcd:v3.5.0
+    environment:
+      - ETCDCTL_API=3
+      - ETCD_NAME=etcd0
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd0:2380
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd0:2379
+      - ETCD_INITIAL_CLUSTER_TOKEN=etcd-cluster
+      - ETCD_INITIAL_CLUSTER=etcd0=http://etcd0:2380,etcd1=http://etcd1:2380,etcd2=http://etcd2:2380
+      - ETCD_INITIAL_CLUSTER_STATE=new
+    networks:
+      - db-network
+    deploy:
+      placement:
+        constraints: [node.labels.db == primary]
+
+  etcd1:
+    image: quay.io/coreos/etcd:v3.5.0
+    environment:
+      - ETCDCTL_API=3
+      - ETCD_NAME=etcd1
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd1:2380
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd1:2379
+      - ETCD_INITIAL_CLUSTER_TOKEN=etcd-cluster
+      - ETCD_INITIAL_CLUSTER=etcd0=http://etcd0:2380,etcd1=http://etcd1:2380,etcd2=http://etcd2:2380
+      - ETCD_INITIAL_CLUSTER_STATE=new
+    networks:
+      - db-network
+    deploy:
+      placement:
+        constraints: [node.labels.db == secondary1]
+
+  etcd2:
+    image: quay.io/coreos/etcd:v3.5.0
+    environment:
+      - ETCDCTL_API=3
+      - ETCD_NAME=etcd2
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd2:2380
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd2:2379
+      - ETCD_INITIAL_CLUSTER_TOKEN=etcd-cluster
+      - ETCD_INITIAL_CLUSTER=etcd0=http://etcd0:2380,etcd1=http://etcd1:2380,etcd2=http://etcd2:2380
+      - ETCD_INITIAL_CLUSTER_STATE=new
+    networks:
+      - db-network
+    deploy:
+      placement:
+        constraints: [node.labels.db == secondary2]
+
+  # Patroni cluster
+  patroni0:
+    image: bitnami/postgresql-repmgr:15
+    environment:
+      - PATRONI_NAME=patroni0
+      - PATRONI_SCOPE=postgres-cluster
+      - PATRONI_LOG_LEVEL=INFO
+      - PATRONI_POSTGRESQL_LISTEN=0.0.0.0:5432
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=patroni0:5432
+      - PATRONI_REPLICATION_USERNAME=replicator
+      - PATRONI_REPLICATION_PASSWORD=${DB_REPLICATION_PASSWORD}
+      - PATRONI_SUPERUSER_USERNAME=postgres
+      - PATRONI_SUPERUSER_PASSWORD=${DB_PASSWORD}
+      - PATRONI_ETCD_URL=etcd0:2379,etcd1:2379,etcd2:2379
+      - PATRONI_POSTGRESQL_DATA_DIR=/var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata0:/var/lib/postgresql/data
+    networks:
+      - db-network
+    deploy:
+      placement:
+        constraints: [node.labels.db == primary]
+      replicas: 1
+
+  patroni1:
+    image: bitnami/postgresql-repmgr:15
+    environment:
+      - PATRONI_NAME=patroni1
+      - PATRONI_SCOPE=postgres-cluster
+      - PATRONI_LOG_LEVEL=INFO
+      - PATRONI_POSTGRESQL_LISTEN=0.0.0.0:5432
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=patroni1:5432
+      - PATRONI_REPLICATION_USERNAME=replicator
+      - PATRONI_REPLICATION_PASSWORD=${DB_REPLICATION_PASSWORD}
+      - PATRONI_SUPERUSER_USERNAME=postgres
+      - PATRONI_SUPERUSER_PASSWORD=${DB_PASSWORD}
+      - PATRONI_ETCD_URL=etcd0:2379,etcd1:2379,etcd2:2379
+      - PATRONI_POSTGRESQL_DATA_DIR=/var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata1:/var/lib/postgresql/data
+    networks:
+      - db-network
+    deploy:
+      placement:
+        constraints: [node.labels.db == secondary1]
+      replicas: 1
+
+  patroni2:
+    image: bitnami/postgresql-repmgr:15
+    environment:
+      - PATRONI_NAME=patroni2
+      - PATRONI_SCOPE=postgres-cluster
+      - PATRONI_LOG_LEVEL=INFO
+      - PATRONI_POSTGRESQL_LISTEN=0.0.0.0:5432
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=patroni2:5432
+      - PATRONI_REPLICATION_USERNAME=replicator
+      - PATRONI_REPLICATION_PASSWORD=${DB_REPLICATION_PASSWORD}
+      - PATRONI_SUPERUSER_USERNAME=postgres
+      - PATRONI_SUPERUSER_PASSWORD=${DB_PASSWORD}
+      - PATRONI_ETCD_URL=etcd0:2379,etcd1:2379,etcd2:2379
+      - PATRONI_POSTGRESQL_DATA_DIR=/var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata2:/var/lib/postgresql/data
+    networks:
+      - db-network
+    deploy:
+      placement:
+        constraints: [node.labels.db == secondary2]
+      replicas: 1
+
+  # HAProxy for read/write splitting
+  haproxy:
+    image: haproxy:2.6
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      - db-network
+    depends_on:
+      - patroni0
+      - patroni1
+      - patroni2
+    deploy:
+      mode: replicated
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+networks:
+  db-network:
+    driver: overlay
+    attachable: true
+
+volumes:
+  pgdata0:
+    driver: local
+  pgdata1:
+    driver: local
+  pgdata2:
+    driver: local

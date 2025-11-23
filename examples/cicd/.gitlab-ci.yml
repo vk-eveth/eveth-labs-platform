@@ -1,0 +1,138 @@
+# CI/CD Pipeline for Eveth Labs Platform
+# This is an example pipeline that demonstrates a complete CI/CD workflow
+
+stages:
+  - test
+  - build
+  - scan
+  - deploy
+  - notify
+
+variables:
+  # Docker configuration
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+  
+  # Application variables
+  APP_NAME: example-app
+  PRODUCTION_ENV: production
+  STAGING_ENV: staging
+  
+  # Registry configuration
+  CI_REGISTRY: harbor.${DOMAIN}
+  CI_REGISTRY_IMAGE: ${CI_REGISTRY}/library/${APP_NAME}
+  
+  # Use Docker-in-Docker for building
+  DOCKER_IMAGE: docker:20.10.16
+  DOCKER_DIND_IMAGE: docker:20.10.16-dind
+
+# Cache Docker layers between pipeline runs
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - .cache/docker
+
+# Services configuration
+services:
+  - name: ${DOCKER_DIND_IMAGE}
+    command: ["--tls=false", "--registry-mirror", "https://mirror.gcr.io", "--insecure-registry=harbor.evethlabstech"]
+
+# Global before_script for all jobs
+.before_script_template: &before_script
+  before_script:
+    - docker info
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
+
+# Job to run unit tests
+test:unit:
+  stage: test
+  image: ${DOCKER_IMAGE}
+  services:
+    - name: ${DOCKER_DIND_IMAGE}
+      command: ["--tls=false"]
+  <<: *before_script
+  script:
+    - docker build -t ${APP_NAME}-test -f Dockerfile.test .
+    - docker run --rm ${APP_NAME}-test npm test
+
+# Job to build the Docker image
+build:image:
+  stage: build
+  image: ${DOCKER_IMAGE}
+  services:
+    - name: ${DOCKER_DIND_IMAGE}
+      command: ["--tls=false"]
+  <<: *before_script
+  script:
+    - docker build -t ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHA} .
+    - docker push ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHA}
+    
+    # Tag as latest for the branch
+    - docker tag ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHA} ${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_SLUG}-latest
+    - docker push ${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_SLUG}-latest
+  
+  # Only run on merge requests and main branch
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Security scanning with Trivy
+scan:security:
+  stage: scan
+  image: ${DOCKER_IMAGE}
+  services:
+    - name: ${DOCKER_DIND_IMAGE}
+      command: ["--tls=false"]
+  <<: *before_script
+  script:
+    - apk add --no-cache curl
+    - wget https://github.com/aquasecurity/trivy/releases/download/v0.45.0/trivy_0.45.0_Linux-64bit.tar.gz
+    - tar -xzf trivy_0.45.0_Linux-64bit.tar.gz
+    - ./trivy image --severity HIGH,CRITICAL ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHA}
+  allow_failure: true  # Don't fail the pipeline for security findings, just report them
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Deploy to staging environment
+deploy:staging:
+  stage: deploy
+  image: ${DOCKER_IMAGE}
+  environment:
+    name: ${STAGING_ENV}
+    url: https://staging.${DOMAIN}
+  <<: *before_script
+  script:
+    - echo "Deploying to staging environment..."
+    - docker compose -f docker-compose.staging.yml up -d
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Manual deployment to production
+deploy:production:
+  stage: deploy
+  image: ${DOCKER_IMAGE}
+  environment:
+    name: ${PRODUCTION_ENV}
+    url: https://${DOMAIN}
+  <<: *before_script
+  script:
+    - echo "Deploying to production..."
+    - docker compose -f docker-compose.prod.yml up -d
+  when: manual  # Requires manual approval
+  rules:
+    - if: $CI_COMMIT_TAG  # Only deploy on tags
+
+# Notify Slack on failure
+notify:slack:
+  stage: notify
+  image: alpine:latest
+  script:
+    - apk add --no-cache curl
+    - |
+      if [ "$CI_JOB_STATUS" == "failed" ]; then
+        curl -X POST -H 'Content-type: application/json' --data '{"text":"❌ Pipeline failed: $CI_PIPELINE_URL"}' $SLACK_WEBHOOK_URL
+      fi
+  when: on_failure
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"

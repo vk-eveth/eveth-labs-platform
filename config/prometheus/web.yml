@@ -1,0 +1,2 @@
+# Basic auth is disabled for local development
+basic_auth_users: {}

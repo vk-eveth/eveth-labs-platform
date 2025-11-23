@@ -1,0 +1,63 @@
+# Environment
+.env.local
+.env.*.local
+
+# Docker
+**/docker-compose.override.yml
+
+# Volumes and Data
+data/
+**/data/*
+!**/data/.gitkeep
+
+# Backups
+backups/*
+!backups/.gitkeep
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# SSL/TLS Certificates
+**/ssl/*.key
+**/ssl/*.crt
+**/ssl/*.pem
+!**/ssl/README.md
+
+# IDE and Editor
+.idea/
+.vscode/
+*.sublime-*
+*.code-workspace
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Dependencies
+node_modules/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build and Test
+build/
+dist/
+*.egg-info/
+*.egg
+coverage/
+htmlcov/
+
+# Projects
+projects/*/node_modules/
+projects/*/dist/
+projects/*/build/

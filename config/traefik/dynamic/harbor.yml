@@ -1,0 +1,12 @@
+http:
+  routers:
+    harbor:
+      rule: Host(`harbor.evethlabstech`)
+      entryPoints:
+        - web
+      service: harbor
+  services:
+    harbor:
+      loadBalancer:
+        servers:
+          - url: http://harbor-nginx:8080

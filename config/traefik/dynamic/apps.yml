@@ -1,0 +1,67 @@
+http:
+  routers:
+    gitlab:
+      rule: Host(`gitlab.evethlabstech`)
+      entryPoints:
+        - web
+      service: gitlab
+    sonar:
+      rule: Host(`sonar.evethlabstech`)
+      entryPoints:
+        - web
+      service: sonar
+    grafana:
+      rule: Host(`grafana.evethlabstech`)
+      entryPoints:
+        - web
+      service: grafana
+    prometheus:
+      rule: Host(`prometheus.evethlabstech`)
+      entryPoints:
+        - web
+      service: prometheus
+    loki:
+      rule: Host(`loki.evethlabstech`)
+      entryPoints:
+        - web
+      service: loki
+    alertmanager:
+      rule: Host(`alertmanager.evethlabstech`)
+      entryPoints:
+        - web
+      service: alertmanager
+    portainer:
+      rule: Host(`portainer.evethlabstech`)
+      entryPoints:
+        - web
+      service: portainer
+
+  services:
+    gitlab:
+      loadBalancer:
+        servers:
+          - url: http://gitlab:80
+    sonar:
+      loadBalancer:
+        servers:
+          - url: http://sonarqube:9000
+    grafana:
+      loadBalancer:
+        servers:
+          - url: http://grafana:3000
+    prometheus:
+      loadBalancer:
+        servers:
+          - url: http://prometheus:9090
+    loki:
+      loadBalancer:
+        servers:
+          - url: http://loki:3100
+    alertmanager:
+      loadBalancer:
+        servers:
+          - url: http://alertmanager:9093
+    portainer:
+      loadBalancer:
+        servers:
+          - url: http://portainer:9000

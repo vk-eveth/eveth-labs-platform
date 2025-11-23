@@ -1,0 +1,433 @@
+networks:
+  eveth-net:
+    external: true
+
+volumes:
+  # GitLab volumes
+  gitlab_data:
+  gitlab_config:
+  gitlab_logs:
+  
+  # Harbor volumes
+  harbor_data:
+  harbor_database:
+  
+  # Monitoring volumes
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  
+  # SonarQube volumes
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:
+  sonar_db_data:
+  
+  # Database volumes
+  postgres_data:
+  redis_data:
+  
+  # Traefik volume
+  traefik_data:
+  
+  # Portainer volume
+  portainer_data:
+
+services:
+  # Reverse Proxy
+  traefik:
+    image: traefik:${TRAEFIK_VERSION:-2.10.1}
+    container_name: traefik
+    restart: always
+    environment:
+      - DOCKER_API_VERSION=1.45
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    ports:
+      - "${TRAEFIK_WEB_PORT:-80}:80"
+      - "${TRAEFIK_WEB_SECURE_PORT:-443}:443"
+      - "${TRAEFIK_DASHBOARD_PORT:-8080}:8080"  # Dashboard
+    command:
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.endpoint=unix:///var/run/docker.sock"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      - "--providers.file.watch=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--log.level=DEBUG"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${DATA_PATH:-./data}/traefik/letsencrypt:/letsencrypt
+      - ${CONFIG_PATH:-./config}/traefik/dynamic:/etc/traefik/dynamic:ro
+    
+    networks:
+      - eveth-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.evethlabstech`)"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.entrypoints=web"
+      - "traefik.http.routers.traefik.middlewares=traefik-auth"
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_AUTH:-admin:$$apr1$$9Cv/1G6F$$LJIzbJZ5v.tmCvDfIXYrV0}"
+
+  # GitLab
+  gitlab:
+    image: gitlab/gitlab-ce:${GITLAB_VERSION:-15.11.0-ce.0}
+    container_name: gitlab
+    restart: always
+    hostname: gitlab.evethlabstech
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://gitlab.evethlabstech'
+        gitlab_rails['gitlab_shell_ssh_port'] = ${GITLAB_SSH_PORT:-2222}
+        gitlab_rails['initial_root_password'] = '${GITLAB_ROOT_PASSWORD:-ChangeMe123!}'
+        nginx['listen_port'] = 80
+        nginx['listen_https'] = false
+        nginx['proxy_set_headers'] = {
+          "X-Forwarded-Proto" => "http",
+          "X-Forwarded-Ssl" => "off"
+        }
+    volumes:
+      - ${DATA_PATH:-./data}/gitlab/config:/etc/gitlab
+      - ${DATA_PATH:-./data}/gitlab/logs:/var/log/gitlab
+      - ${DATA_PATH:-./data}/gitlab/data:/var/opt/gitlab
+    networks:
+      eveth-net:
+        aliases:
+          - gitlab.evethlabstech
+          - gitlab.internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.gitlab.rule=Host(`gitlab.evethlabstech`)"
+      - "traefik.http.routers.gitlab.entrypoints=web"
+      - "traefik.http.services.gitlab.loadbalancer.server.port=80"
+    ports:
+      - "${GITLAB_SSH_PORT:-2222}:22"
+
+  # SonarQube
+  sonarqube:
+    image: sonarqube:${SONARQUBE_VERSION:-9.9.0-community}
+    container_name: sonarqube
+    restart: always
+    environment:
+      - SONAR_JDBC_URL=jdbc:postgresql://postgres:5432/sonar
+      - SONAR_JDBC_USERNAME=sonar
+      - SONAR_JDBC_PASSWORD=${SONAR_JDBC_PASSWORD:-sonar}
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+      - SONAR_WEB_CONTEXT=/
+    volumes:
+      - ${DATA_PATH:-./data}/sonarqube/conf:/opt/sonarqube/conf
+      - ${DATA_PATH:-./data}/sonarqube/data:/opt/sonarqube/data
+      - ${DATA_PATH:-./data}/sonarqube/extensions:/opt/sonarqube/extensions
+      - ${DATA_PATH:-./data}/sonarqube/logs:/opt/sonarqube/logs
+    networks:
+      - eveth-net
+    depends_on:
+      - postgres
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.sonarqube.rule=Host(`sonar.evethlabstech`)"
+      - "traefik.http.routers.sonarqube.entrypoints=web"
+      - "traefik.http.services.sonarqube.loadbalancer.server.port=9000"
+
+  # PostgreSQL for SonarQube
+  postgres:
+    image: postgres:${POSTGRES_VERSION:-13}
+    container_name: sonarqube-db
+    environment:
+      - POSTGRES_USER=sonar
+      - POSTGRES_PASSWORD=${SONAR_JDBC_PASSWORD:-sonar}
+      - POSTGRES_DB=sonar
+    volumes:
+      - ${DATA_PATH:-./data}/postgres:/var/lib/postgresql/data
+    networks:
+      - eveth-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar -d sonar"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis
+  redis:
+    image: redis:${REDIS_VERSION:-7}
+    container_name: redis
+    restart: always
+    command: redis-server --requirepass ${REDIS_PASSWORD:-ChangeMe123!}
+    volumes:
+      - ${DATA_PATH:-./data}/redis:/data
+    networks:
+      - eveth-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 30s
+      retries: 3
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:${PROMETHEUS_VERSION:-v2.40.0}
+    container_name: prometheus
+    restart: always
+    user: root  # Run as root to avoid permission issues
+    environment:
+      - PUID=0
+      - PGID=0
+    volumes:
+      - ${CONFIG_PATH:-./config}/prometheus:/etc/prometheus
+      - ${DATA_PATH:-./data}/prometheus:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.config.file=/etc/prometheus/web.yml'  # For basic auth if needed
+    networks:
+      - eveth-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.evethlabstech`)"
+      - "traefik.http.routers.prometheus.entrypoints=web"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:${GRAFANA_VERSION:-9.3.2}
+    container_name: grafana
+    restart: always
+    user: "0:0"  # Run as root to avoid permission issues
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-ChangeMe123!}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://grafana.evethlabstech
+      - GF_SERVER_SERVE_FROM_SUB_PATH=false
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_PATHS_DATA=/var/lib/grafana
+      - GF_PATHS_LOGS=/var/log/grafana
+      - GF_PATHS_PLUGINS=/var/lib/grafana/plugins
+    volumes:
+      - ${DATA_PATH:-./data}/grafana:/var/lib/grafana
+      - ${CONFIG_PATH:-./config}/grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - eveth-net
+    depends_on:
+      - prometheus
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.evethlabstech`)"
+      - "traefik.http.routers.grafana.entrypoints=web"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
+  # Loki
+  loki:
+    image: grafana/loki:${LOKI_VERSION:-2.7.3}
+    container_name: loki
+    restart: always
+    command: -config.file=/etc/loki/loki-config.yaml
+    volumes:
+      - ${DATA_PATH:-./data}/loki:/loki
+      - ${CONFIG_PATH:-./config}/loki:/etc/loki
+    networks:
+      - eveth-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.loki.rule=Host(`loki.evethlabstech`)"
+      - "traefik.http.routers.loki.entrypoints=web"
+      - "traefik.http.services.loki.loadbalancer.server.port=3100"
+
+  # Portainer
+  portainer:
+    image: portainer/portainer-ce:${PORTAINER_VERSION:-2.16.2}
+    container_name: portainer
+    restart: always
+    command: -H unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DATA_PATH:-./data}/portainer:/data
+    networks:
+      - eveth-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portainer.rule=Host(`portainer.evethlabstech`)"
+      - "traefik.http.routers.portainer.entrypoints=web"
+      - "traefik.http.services.portainer.loadbalancer.server.port=9000"
+      - "traefik.http.routers.portainer.service=portainer"
+      - "traefik.http.services.portainer.loadbalancer.passhostheader=true"
+    ports:
+      - "9000:9000"  # Direct access to Portainer if needed
+
+  # Alertmanager
+  alertmanager:
+    image: prom/alertmanager:${ALERTMANAGER_VERSION:-latest}
+    container_name: alertmanager
+    restart: always
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    volumes:
+      - ${CONFIG_PATH:-./config}/alertmanager:/etc/alertmanager
+      - ${DATA_PATH:-./data}/alertmanager:/alertmanager
+    networks:
+      - eveth-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.alertmanager.rule=Host(`alertmanager.evethlabstech`)"
+      - "traefik.http.routers.alertmanager.entrypoints=web"
+      - "traefik.http.services.alertmanager.loadbalancer.server.port=9093"
+
+  # Harbor (Container Registry) - Compose-managed
+  log:
+    image: goharbor/harbor-log:v${HARBOR_VERSION:-2.10.0}
+    container_name: harbor-log
+    restart: always
+    volumes:
+      - ${LOG_PATH:-./logs}/harbor:/var/log/docker
+      - type: bind
+        source: ${HARBOR_INSTALL_DIR:-/opt/harbor/harbor}/common/config/log/logrotate.conf
+        target: /etc/logrotate.d/logrotate.conf
+      - type: bind
+        source: ${HARBOR_INSTALL_DIR:-/opt/harbor/harbor}/common/config/log/rsyslog_docker.conf
+        target: /etc/rsyslog.d/rsyslog_docker.conf
+    ports:
+      - 127.0.0.1:1514:10514
+    networks:
+      - eveth-net
+
+  postgresql:
+    image: goharbor/harbor-db:v${HARBOR_VERSION:-2.10.0}
+    container_name: harbor-db
+    restart: always
+    env_file:
+      - ${HARBOR_INSTALL_DIR:-/opt/harbor/harbor}/common/config/db/env
+    volumes:
+      - ${DATA_PATH:-./data}/harbor/database:/var/lib/postgresql/data
+    networks:
+      - eveth-net
+    depends_on:
+      - log
+
+  registry:
+    image: goharbor/registry-photon:v${HARBOR_VERSION:-2.10.0}
+    container_name: harbor-registry
+    restart: always
+    volumes:
+      - ${DATA_PATH:-./data}/harbor/registry:/storage
+      - ${HARBOR_INSTALL_DIR:-/opt/harbor/harbor}/common/config/registry:/etc/registry
+    networks:
+      - eveth-net
+    depends_on:
+      - log
+
+  registryctl:
+    image: goharbor/harbor-registryctl:v${HARBOR_VERSION:-2.10.0}
+    container_name: harbor-registryctl
+    restart: always
+    env_file:
+      - ${HARBOR_INSTALL_DIR:-/opt/harbor/harbor}/common/config/registryctl/env
+    volumes:
+      - ${DATA_PATH:-./data}/harbor/registry:/storage
+      - ${HARBOR_INSTALL_DIR:-/opt/harbor/harbor}/common/config/registry:/etc/registry
+      - type: bind
+        source: ${HARBOR_INSTALL_DIR:-/opt/harbor/harbor}/common/config/registryctl/config.yml
+        target: /etc/registryctl/config.yml
+    networks:
+      - eveth-net
+    depends_on:
+      - log
+      - registry
+
+  core:
+    image: goharbor/harbor-core:v${HARBOR_VERSION:-2.10.0}
+    container_name: harbor-core
+    restart: always
+    env_file:
+      - ${HARBOR_INSTALL_DIR:-/opt/harbor/harbor}/common/config/core/env
+    volumes:
+      - ${DATA_PATH:-./data}/harbor/ca_download:/etc/core/ca
+      - ${DATA_PATH:-./data}/harbor:/data
+      - ${HARBOR_INSTALL_DIR:-/opt/harbor/harbor}/common/config/core/certificates:/etc/core/certificates
+      - type: bind
+        source: ${HARBOR_INSTALL_DIR:-/opt/harbor/harbor}/common/config/core/app.conf
+        target: /etc/core/app.conf
+    networks:
+      - eveth-net
+    depends_on:
+      - log
+      - registry
+      - postgresql
+
+  portal:
+    image: goharbor/harbor-portal:v${HARBOR_VERSION:-2.10.0}
+    container_name: harbor-portal
+    restart: always
+    volumes:
+      - type: bind
+        source: ${HARBOR_INSTALL_DIR:-/opt/harbor/harbor}/common/config/portal/nginx.conf
+        target: /etc/nginx/nginx.conf
+    networks:
+      - eveth-net
+    depends_on:
+      - log
+
+  jobservice:
+    image: goharbor/harbor-jobservice:v${HARBOR_VERSION:-2.10.0}
+    container_name: harbor-jobservice
+    restart: always
+    env_file:
+      - ${HARBOR_INSTALL_DIR:-/opt/harbor/harbor}/common/config/jobservice/env
+    volumes:
+      - ${DATA_PATH:-./data}/harbor/job_logs:/var/log/jobs
+      - type: bind
+        source: ${HARBOR_INSTALL_DIR:-/opt/harbor/harbor}/common/config/jobservice/config.yml
+        target: /etc/jobservice/config.yml
+    networks:
+      - eveth-net
+    depends_on:
+      - core
+
+  trivy-adapter:
+    image: goharbor/trivy-adapter-photon:v${HARBOR_VERSION:-2.10.0}
+    container_name: harbor-trivy
+    restart: always
+    volumes:
+      - ${DATA_PATH:-./data}/harbor/trivy-adapter/trivy:/home/scanner/.cache/trivy
+      - ${DATA_PATH:-./data}/harbor/trivy-adapter/reports:/home/scanner/.cache/reports
+    networks:
+      - eveth-net
+    depends_on:
+      - log
+
+  proxy:
+    image: goharbor/nginx-photon:v${HARBOR_VERSION:-2.10.0}
+    container_name: harbor-nginx
+    restart: always
+    volumes:
+      - ${HARBOR_INSTALL_DIR:-/opt/harbor/harbor}/common/config/nginx:/etc/nginx
+    networks:
+      - eveth-net
+    depends_on:
+      - core
+      - portal
+      - registry
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.harbor.rule=Host(`harbor.evethlabstech`)"
+      - "traefik.http.routers.harbor.entrypoints=web"
+      - "traefik.http.services.harbor.loadbalancer.server.port=8080"
+
+  # gitlab-runner:
+  #   image: gitlab/gitlab-runner:alpine
+  #   container_name: gitlab-runner
+  #   restart: always
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #     - ${DATA_PATH:-./data}/gitlab-runner:/etc/gitlab-runner
+  #   networks:
+  #     - eveth-net
+  #   depends_on:
+  #     - gitlab

@@ -1,0 +1,2 @@
+# This file ensures the directory is tracked by Git
+# The directory is used for storing backup files which are ignored by .gitignore
